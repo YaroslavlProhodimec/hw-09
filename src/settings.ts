@@ -11,6 +11,7 @@ import {authRouter} from "./routes/auth-route";
 import {usersRouter} from "./routes/users-route";
 import {commentsRoute} from "./routes/comments-route";
 import {emailRouter} from "./routes/email-router";
+import {routerSecurityDevices} from "./routes/security-devices-route";
 
 export const app = express();
 app.use(morgan("dev"));
@@ -25,6 +26,7 @@ app.use('/testing', testingRouter)
 app.use('/auth', authRouter)
 app.use('/users', usersRouter)
 app.use('/comments', commentsRoute)
+app.use('/security', routerSecurityDevices)
 app.use('/', emailRouter)
 app.use(async (req: Request, res: Response, next: NextFunction) => {
     next(StatusCodes.NOT_FOUND);
