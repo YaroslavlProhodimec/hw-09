@@ -1,135 +1,48 @@
-import {OutputPostType, PostType} from "../types/post/output";
+import "reflect-metadata";
+import {CommentsModel, LikesModel} from "../db/db";
 import {ObjectId, WithId} from "mongodb";
-import {commentsMapper} from "../types/comments/mapper";
-import {usersCommandsRepository} from "./commands-repository/usersCommandsRepository";
-import {commentsCollection} from "../db";
+import {CommentDbModel} from "../models/comment-models/comment-db-model";
+import {InputCommentModel} from "../models/comment-models/input-coment-model";
+import {Like} from "../classes/like-class";
+import {LikesStatus} from "../enum/likes-status-enum";
+import {injectable} from "inversify";
 
+@injectable()
 export class CommentsRepository {
-    static async getAllCommentsQueryParam(sortData: any, postId: any) {
-        const sortDirection = sortData.sortDirection ?? 'desc'
-        const sortBy = sortData.sortBy ?? 'createdAt'
-        const searchNameTerm = sortData.searchNameTerm ?? null
-        const pageSize = (sortData.pageSize) ?? 10
-        const pageNumber = sortData.pageNumber ?? 1
 
-        let filter = {
-            id: postId
-        }
-
-        // if (searchNameTerm) {
-        //     filter = {
-        //         name: {
-        //             $regex: searchNameTerm,
-        //             $options: 'i'
-        //         }
-        //     }
-        // }
-        // const filter = {id: id}
-
-        const comments: any = await commentsCollection.find({postId: postId})
-            .sort(sortBy, sortDirection)
-            .skip((pageNumber - 1) * pageSize)
-            .limit(+pageSize)
-            .toArray()
-
-        const totalCount = await commentsCollection
-            .countDocuments({postId:postId})
-
-        const pagesCount = Math.ceil(totalCount / +pageSize)
-
-        return {
-            pagesCount: pagesCount,
-            page: +pageNumber,
-            pageSize: +pageSize,
-            totalCount: totalCount,
-            items: comments.map(commentsMapper)
-        }
-
+    async updateLike(newStatusLike: LikesStatus, userId: ObjectId, commentId: string) {
+        const updateResult = await LikesModel.findOneAndUpdate({$and: [{userId: userId}, {parentId: commentId}]}, {$set: {myStatus: newStatusLike}})
+        return updateResult
 
     }
 
-    static async getCommentById(id: any): Promise<OutputPostType | null> {
-        try {
-            const comment: any = await commentsCollection.findOne({_id: new ObjectId(id)
-            })
-            console.log(comment, 'comment')
-            if (!comment) {
-                return null
-            }
-            return commentsMapper(comment)
-        } catch (e) {
-            return null
-        }
+    async saveLike(newLike: Like): Promise<string> {
+        const saveResult = await LikesModel.create(newLike)
+        return saveResult.id
     }
 
-    static async createComments(content: string, id: string, postId: any) {
-
-        const createdAt = new Date()
-
-        // const user: any = await usersCollection.findOne({_id: id})
-        const foundUser = await usersCommandsRepository.findUserById(id);
-
-        const newComment: any = {
-            // id: postId,
-            postId:postId,
-            content,
-            commentatorInfo: {
-                userId: id,
-                userLogin: foundUser.accountData.login,
-            },
-            createdAt: createdAt.toISOString()
-        }
-        const comment = await commentsCollection.insertOne(newComment)
-
-        if (comment) {
-            const result: any = await commentsCollection.findOne({_id:comment.insertedId })
-            return {
-                id: result!._id,
-                content: result!.content,
-                commentatorInfo: result.commentatorInfo,
-                // commentatorInfo: {
-                //     userId: result.commentatorInfo.userId,
-                //     userLogin: result.commentatorInfo.userLogin,
-                // },
-                createdAt: result!.createdAt,
-            }
-
-        } else {
-            return null
-        }
-        //
+    async findLikeCommentThisUser(commentId: string, userId: ObjectId) {
+        return LikesModel.findOne({$and: [{userId: userId}, {parentId: commentId}]})
     }
 
-    static async updateComment(id: string, content: any,) {
+    async findCommentById(id: string): Promise<WithId<CommentDbModel> | null> {
+        return CommentsModel.findOne({_id: new ObjectId(id)})
 
-        let result = await commentsCollection.updateOne({_id:
-            new ObjectId(
-            id
-            )
-        }, {
-            $set: {
-                content: content,
-            }
-        })
-
-        return result.matchedCount === 1
     }
 
-    static async deleteComment(id: string) {
+    async createNewComment(newComment: CommentDbModel): Promise<ObjectId> {
+        const resultInsert = await CommentsModel.create(newComment)
+        return resultInsert.id
+    }
 
-        try {
+    async updateCommentById(newComment: InputCommentModel, commentId: string): Promise<boolean> {
+        const resultUpdate = await CommentsModel.updateOne({_id: new ObjectId(commentId)}, {$set: newComment})
+        return resultUpdate.matchedCount === 1
+    }
 
-            const result = await commentsCollection.deleteOne({_id:
-                new ObjectId(
-                id
-                )
-            })
-            return result.deletedCount === 1
-
-        } catch (e) {
-
-            return false
-
-        }
+    async deleteComment(id: ObjectId | string): Promise<boolean> {
+        const resultDelete = await CommentsModel.deleteOne({_id: new ObjectId(id)})
+        return resultDelete.deletedCount === 1
     }
 }
+

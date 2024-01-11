@@ -1,16 +1,16 @@
-import {runDB} from "./db";
-import { app } from "./settings";
-import * as dotenv from "dotenv";
+import dotenv from 'dotenv'
+import {runDB} from "./db/db";
+import {app} from "./setting";
 
-dotenv.config();
-const port = process.env.PORT || 5000;
+dotenv.config()
 
-const startApp = async () => {
-    await runDB();
+const port = process.env.PORT || 3003
+
+const starApp = async () => {
+    await runDB()
     app.listen(port, () => {
-        console.log(`Example app listening on port ${port}`);
-    });
-};
+        console.log(`Example app listening on port ${port}`)
+    })
+}
 
-startApp();
-module.exports = app;
+starApp();

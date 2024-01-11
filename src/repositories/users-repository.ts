@@ -1,206 +1,77 @@
-import {ObjectId, WithId} from "mongodb";
-import bcrypt from 'bcrypt'
-import {BlogType} from "../types/blog/output";
-import {usersMapper} from "../types/users/mapper";
-import {usersCommandsRepository} from "./commands-repository/usersCommandsRepository";
-import {UserAlreadyExistsError} from "../utils/errors-utils/registration-errors/UserAlreadyExistsError";
-import {usersCollection} from "../db";
-import {authService} from "../service/authService";
+import "reflect-metadata";
+import {AdminDbModel} from "../models/users-model/admin-db-model";
+import {EmailsModel, UsersModel} from "../db/db";
+import {DeleteResult, ObjectId} from "mongodb";
+import {UsersDbModel} from "../models/users-model/users-db-model";
+import {ResultCodeHandler} from "../models/result-code-handler";
+import {resultCodeMap} from "../utils/helpers/result-code";
+import {Errors} from "../enum/errors";
+import {CodeConfirmModel} from "../models/users-model/code-confirm-model";
+import {EmailConfirmationModel} from "../models/email-model.ts/email-confirmation-model";
+import add from "date-fns/add";
+import {injectable} from "inversify";
 
+@injectable()
 export class UsersRepository {
-    static async getAllUsers(sortData: any) {
 
-        const sortDirection = sortData.sortDirection ?? 'desc'
-        const sortBy = sortData.sortBy ?? 'createdAt'
-        const searchNameTerm = sortData.searchNameTerm ?? null
-        const pageSize = sortData.pageSize ?? 10
-        const pageNumber = sortData.pageNumber ?? 1
-        // console.log(sortData.searchEmailTerm,'sortData.searchEmailTerm ')
-        // console.log(sortData.searchLoginTerm,'sortData.searchLoginTerm ')
-        const searchLoginTerm = sortData.searchLoginTerm ?? null
-        const searchEmailTerm = sortData.searchEmailTerm ?? null
-
-        let filterLogin = {}
-        let filterEmail = {}
-
-        if (searchLoginTerm) {
-            filterLogin = {
-                login: {
-                    $regex: searchLoginTerm,
-                    $options: 'i'
-                }
-            }
+    async recoveryPassword(id: ObjectId, codeRecovery: string): Promise<boolean> {
+        const recoveryInfo = {
+            code: codeRecovery,
+            exp: add(new Date(), {minutes: 5})
         }
-        if (searchEmailTerm) {
-            filterEmail = {
-                email: {
-                    $regex: searchEmailTerm,
-                    $options: 'i'
-                }
-            }
-        }
-        const filter = {
-            $or: [
-                filterLogin,
-                filterEmail,
-            ]
-        }
-
-        const users: WithId<BlogType>[] = await usersCollection.find(filter)
-            .sort(sortBy, sortDirection)
-            .skip((+pageNumber - 1) * +pageSize)
-            .limit(+pageSize)
-            .toArray()
-
-        const totalCount = await usersCollection
-            .countDocuments(filter)
-
-        const pageCount = Math.ceil(totalCount / +pageSize)
-
-        return {
-            pagesCount: pageCount,
-            page: +pageNumber,
-            pageSize: +pageSize,
-            totalCount: +totalCount,
-            items: users.map(usersMapper)
-        }
-
+        const updateResult = await UsersModel.updateOne({_id: new ObjectId(id)}, {$set: recoveryInfo})
+        return updateResult.matchedCount === 1
     }
 
-    static async createUser(login: any, email: any,
-                            password: any,
-                            confirmationCode: string | null,
-                            isConfirmed: boolean,
-                            expirationDate: string | null) {
-
-        const passwordSalt = await bcrypt.genSalt(10)
-        const passwordHash = await this._generateHash(password, passwordSalt)
-        console.log(passwordSalt, 'passwordSalt')
-        console.log(passwordHash, 'passwordHash')
-        // const newUser = {
-        //     _id: new ObjectId(),
-        //     login:login,
-        //     email,
-        //     passwordHash,
-        //     passwordSalt,
-        //     createdAt: new Date()
-        // }
-        const newUser = {
-            accountData: {
-                passwordSalt,
-                passwordHash,
-                login,
-                email,
-                createdAt: new Date(),
-            },
-            emailConfirmation: {
-                confirmationCode,
-                isConfirmed,
-                expirationDate,
-            },
-        };
-        const createUserResult = await usersCommandsRepository.createNewUser(newUser);
-
-        if (createUserResult === "login") {
-            return new UserAlreadyExistsError(
-                createUserResult,
-                "User with the given login already exists"
-            );
-        } else if (createUserResult === "email") {
-            return new UserAlreadyExistsError(
-                createUserResult,
-                "User with the given email already exists"
-            );
-        } else {
-            await authService.createRefreshTokenBlacklistForUser(
-                new ObjectId(createUserResult.id)
-            );
-            return createUserResult;
-        }
+    async resendingEmail(newConfirmationData: EmailConfirmationModel) : Promise<boolean> {
+        const resultUpdateConfirmData = await EmailsModel.updateOne({email: newConfirmationData.email}, {$set: newConfirmationData})
+        return resultUpdateConfirmData.acknowledged
     }
 
-    static async deleteUser(id: any) {
+    async confirmUser(body: CodeConfirmModel): Promise<ResultCodeHandler<null>> {
+        const findUserEmailByCod = await EmailsModel.findOne({confirmationCode: body.code})
+        if(!findUserEmailByCod) {
+            return resultCodeMap(false, null, Errors.Code_No_Valid)
+        }
+        if(findUserEmailByCod.isConfirmed) {
+            return resultCodeMap(false, null, Errors.Is_Confirmed)
+        }
+        if(findUserEmailByCod.expirationDate < new Date()) {
+            return resultCodeMap(false, null, Errors.Expiration_Date)
+        }
+        await EmailsModel.updateOne({email: findUserEmailByCod.email}, {$unset: {expirationDate: 1, confirmationCode: 1},  $set:{isConfirmed: true}})
+        return resultCodeMap(true, null)
+    }
 
-        try {
-            const result = await usersCollection.deleteOne({_id: new ObjectId(id)})
-            return result.deletedCount === 1
-        } catch (e) {
+    async findUserById(id: ObjectId): Promise<string | null> {
+        const findUser = await UsersModel.findOne({_id: id})
+        if (!findUser) return null
+        return findUser.login
+    }
+
+    async createUser(newUser: AdminDbModel | UsersDbModel): Promise<ObjectId> {
+        if('emailConfirmation' in newUser) {
+            const createResult = await UsersModel.create(newUser.accountData)
+            await EmailsModel.create(newUser.emailConfirmation)
+            return createResult.id
+        }
+        const createResult = await UsersModel.create(newUser)
+        return createResult.id
+    }
+
+    async deleteUsersById(id: string): Promise<boolean> {
+        const findUser = await UsersModel.findOne({_id: new ObjectId(id)})
+        if(!findUser) {
             return false
         }
+        await EmailsModel.deleteOne({email: findUser.email})
+        const isDelete: DeleteResult = await UsersModel.deleteOne({_id: new ObjectId(id)})
+        return isDelete.deletedCount === 1
     }
 
-    static async checkCredentials(authData: any) {
-        console.log(authData, 'authData')
-        // const sortDirection = authData.sortDirection ?? 'desc'
-        // const sortBy = authData.sortBy ?? 'createdAt'
-        // const searchNameTerm = authData.searchNameTerm ?? null
-        // const pageSize = authData.pageSize ?? 10
-        // const pageNumber = authData.pageNumber ?? 1
-        const searchLoginTerm = authData.loginOrEmail ?? null
-        const searchEmailTerm = authData.loginOrEmail ?? null
-
-        let filterLogin = {}
-        let filterEmail = {}
-        console.log(searchLoginTerm, 'searchLoginTerm')
-        console.log(searchEmailTerm, 'searchEmailTerm')
-
-        if (searchLoginTerm) {
-            filterLogin = {
-                'accountData.login': {
-                    $regex: searchLoginTerm,
-                    $options: 'i'
-                }
-            }
-        }
-        if (searchEmailTerm) {
-            filterEmail = {
-                'accountData.email': {
-                    $regex: searchEmailTerm,
-                    $options: 'i'
-                }
-            }
-        }
-
-        const filter = {
-            $or: [
-                filterLogin,
-                filterEmail,
-            ]
-        }
-        console.log(filter, 'filter')
-        const users: any = await usersCollection.findOne(filter)
-        // .find(filter)
-        // .sort(sortBy, sortDirection)
-        // .skip((+pageNumber - 1) * +pageSize)
-        // .limit(+pageSize)
-        // .toArray()
-
-        console.log(users, 'users')
-
-        if (!users) {
-            return false
-        }
-
-        // const totalCount = await usersCollection
-        //     .countDocuments(filter)
-
-        console.log(users.accountData.passwordHash,
-            'users.passwordSalt')
-        // const pageCount = Math.ceil(totalCount / +pageSize)
-        const passwordHash = await this._generateHash(authData.password, users.accountData.passwordHash)
-        if (users.accountData.passwordHash !== passwordHash) {
-            return false
-        }
-        return users
-
+    async updatePassword(id: ObjectId, newPasswordHash: string) {
+        const resultUpdate = await UsersModel.updateOne({_id: new ObjectId(id)}, {$unset:{code: 1, exp: 1}, $set: {password: newPasswordHash}})
+        return resultUpdate.matchedCount === 1
     }
-
-
-    static async _generateHash(password: any, salt: any) {
-        const hash = await bcrypt.hash(password, salt)
-        console.log(hash, 'hash')
-
-        return hash
-    }
-
 }
+

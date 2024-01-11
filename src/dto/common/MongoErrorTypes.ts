@@ -1,1 +1,0 @@
-export type UserNotRegisteredField = "login" | "email";

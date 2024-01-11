@@ -1,45 +1,48 @@
-import nodemailer from "nodemailer";
-import smtpTransport from "nodemailer-smtp-transport";
+import "reflect-metadata";
+import {injectable} from "inversify";
+import nodemailer from 'nodemailer'
 
-export const emailAdapter = {
-    async sendEmail(email: string, html: string) {
-        try {
-            let transport = nodemailer.createTransport(
-                smtpTransport(
-                    {
-                        service: "gmail",
-                        auth: {
-                            user: process.env.MAIL,
-                            pass: process.env.PASS,
-                        },
-                    })
-            );
 
-            transport.verify((error, success) => {
-                if (error) {
-                    console.log(error);
-                } else {
-                    console.log("Ready for messages");
-                    console.log(success);
-                }
-            });
-            let info = await transport.sendMail(
-                    {
-                        from: 'Tarantino',
-                        to: email,
-                        subject: "Email confirmation code",
-                        html: html
-                    }
-                )
-            console.log(info, 'info')
+@injectable()
+export class EmailAdapter {
+    async sendEmail(email: string, code: string): Promise<boolean> {
+        let transport = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.MAIL,
+                pass: process.env.PASS
+            }
+        });
+        let info = await transport.sendMail({
+            from: 'Maxim <test.api.incub@gmail.com>',
+            to: email,
+            subject: 'Back-end Lessons,',
+            html: ` <h1>Thank for your registration</h1>
+                    <p>To finish registration please follow the link below:
+                    <a href='https://somesite.com/confirm-email?code=${code}'>complete registration</a>
+                    </p>`
+        })
+        return info.accepted.length > 0;
+    }
 
-        } catch (e) {
-            console.log(e, 'error final grande')
-        }
-        // res.send({
-        //     'email': req.body.email,
-        //     'message': req.body.message,
-        //     'subject': req.body.subject
-        // })
+    async sendPassword(email: string, code: string): Promise<boolean> {
+        let transport = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.MAIL,
+                pass: process.env.PASS
+            }
+        });
+        let info = await transport.sendMail({
+            from: 'Maxim <test.api.incub@gmail.com>',
+            to: email,
+            subject: 'Back-end Lessons,',
+            html: `  <h1>Password recovery</h1>
+                     <p>To finish password recovery please follow the link below:
+                     <a href='https://somesite.com/password-recovery?recoveryCode=${code}'>recovery password</a>
+                     </p>`
+        })
+        return info.accepted.length > 0;
     }
 }
+

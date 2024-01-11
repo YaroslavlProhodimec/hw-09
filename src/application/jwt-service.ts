@@ -1,54 +1,41 @@
-import jwt, {
-  JsonWebTokenError,
-  NotBeforeError,
-  TokenExpiredError,
-} from "jsonwebtoken";
-import * as dotenv from "dotenv";
-import { JwtPayloadResult } from "../dto/common/jwt/JwtPayloadResult";
+import "reflect-metadata";
+import {injectable} from "inversify";
+import jwt, {JwtPayload} from 'jsonwebtoken';
+import {settings} from "../settings";
+import {AdminDbModel} from "../models/users-model/admin-db-model";
+import {ObjectId, WithId} from "mongodb";
 
-dotenv.config();
 
-export const jwtService = {
-  async  createJWT(
-    userId: string,
-    secret: string,
-    expiresIn: number
-  ): Promise<string> {
-    const token = jwt.sign({ userId }, secret, {
-      expiresIn,
-    });
-    return token;
-  },
-  async getJwtPayloadResult(
-    token: string,
-    secret: string
-  ): Promise<JwtPayloadResult | null> {
-    try {
-      console.log(token,'token')
-      const result = jwt.verify(token, secret);
-      console.log(result,'result jwt.verify(token, secret);')
-      return result as JwtPayloadResult;
-    } catch (error) {
-      if (error instanceof TokenExpiredError) {
-        console.log({
-          name: error.name,
-          message: error.message,
-          expiredAt: error.expiredAt,
-        });
-        return null;
-      } else if (error instanceof JsonWebTokenError) {
-        console.log({
-          name: error.name,
-          message: error.message,
-        });
-        return null;
-      } else if (error instanceof NotBeforeError) {
-        console.log({
-          name: error.name,
-          message: error.message,
-        });
-        return null;
-      } else return null;
+@injectable()
+export class JwtService {
+    async createAccessToken(user: WithId<AdminDbModel>) {
+        return jwt.sign({userID: user._id}, settings.SECRET_KEY, {expiresIn: '600s'})
+
     }
-  },
-};
+
+    async createRefreshToken(deviceId: string, userId: string) {
+        return jwt.sign({deviceId: deviceId, userId: userId}, settings.SECRET_KEY, {expiresIn: '3600s'})
+
+    }
+
+   static async verifyJWT(token: string): Promise<ObjectId | null> {
+        try {
+            const result: any = jwt.verify(token, settings.SECRET_KEY)
+            return new ObjectId(result.userID)
+        } catch (e) {
+            return null
+        }
+
+    }
+
+    async decodeToken(token: string) {
+        try {
+            return jwt.verify(token, settings.SECRET_KEY) as JwtPayload
+        } catch (e) {
+            return null
+        }
+
+    }
+}
+
+
